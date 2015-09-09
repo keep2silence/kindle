@@ -1,12 +1,15 @@
 #!/usr/bin/perl -w
 #
+my $permit = 0;
 while (<>) {
-	next if (/^\s*$/);
-	next if (/举报/);
-	next if (/作者/);
-	next if (/mark/);
-	exit if (/^References/);
+	if ($permit == 1 || /楼主：.+时间：/) {
+		$permit = 1;
 
-	printf;
+		if (/举报.+回复/) {
+			$permit = 0;
+			next;
+		}
+		printf;
+	}
 }
 
