@@ -1,2 +1,2 @@
 # 将1.cpp使用的boost库最小集合放入target目录中，target需要先创建
-bcp --scan --boost=~/tools/boost_1_65_1/ 1.cpp target
+bcp --scan --boost=${HOME}/tools/boost_1_65_1/ 1.cpp target
