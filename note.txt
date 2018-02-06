@@ -4,4 +4,6 @@ bcp --scan --boost=${HOME}/tools/boost_1_65_1/ 1.cpp target
 # 只要可能，switch的default的使用应该最多（default最快），而if... else应该在第一个
 # if放置最常见情况。有时在switch前设置一、两个if／else也可以。
 
-
+# vim 输入数字下表，比如log₂N 
+数字上标是插入模式下按 ^k 然后 1S 2S 3S……
+数字下标是插入模式下按 ^k 然后 1s 2s 3s……
