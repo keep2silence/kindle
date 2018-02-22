@@ -7,3 +7,7 @@ bcp --scan --boost=${HOME}/tools/boost_1_65_1/ 1.cpp target
 # vim 输入数字下表，比如log₂N 
 数字上标是插入模式下按 ^k 然后 1S 2S 3S……
 数字下标是插入模式下按 ^k 然后 1s 2s 3s……
+
+# stdbuf, ex01 每隔1s printf一个字符a，因为默认是fullcache，很长时间看不到输出，
+# stdbuf可以改变可执行文件的缓冲方式，0代表无缓冲
+stdbuf -o 0 ./ex01 
