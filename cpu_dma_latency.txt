@@ -1,0 +1,94 @@
+/dev/cpu_dma_latency 分析
+
+    本文讲述了/dev/cpu_dma_latency背后的技术原理，以及从应用角度如何使用
+
+    当代cpu在空闲时会很主动的向C-state(省电状态)状态迁移，C0状态是正常使用状态，随着C后面数字
+    增加cpu中的一些组件被逐渐关闭睡眠得更深，功耗被降低得更多。
+
+    当应用程序需要100%使用cpu时，需要更多时间恢复到C0状态，这个恢复过程是在原子上下文进行的
+    在此期间此core不能用于其他进程，如果多个core同时开始迁移到C0状态，会产生大量的处理器间
+    中断(IPIs)，在处理这些中断时会引起系统停顿一些时间，这些都会引起应用程序不能及时处理各种
+    关注的事件。 对于有实时需求的应用这个恢复过程会引起比较大的问题，不能被接受。
+
+    目前linux系统可以采用两种方法防止core在空闲时进入更深的C状态：
+    
+    1. 修改kernel启动参数，加入processor.max_cstate=1 idle=poll
+    以Ubuntu 19.04为例 vi /boot/grub/grub.cfg
+
+    linux   /boot/vmlinuz-5.0.0-15-lowlatency root=UUID=51333ca3-9097-40af-98d9-geace6a17e61 ro  quiet splash $vt_handoff processor.max_cstate=1 idle=poll 
+
+    保存后，重启系统 (也可以在grub中临时加入这两个参数)
+
+    重启后，cat /proc/cpuinfo，可以看到各个core的cpuMHZ全部最大频率运行
+
+    processor   : 1
+    vendor_id   : GenuineIntel
+    cpu family  : 6
+    model       : 61
+    model name  : Intel(R) Core(TM) i5-5200U CPU @ 2.20GHz
+    stepping    : 4
+    microcode   : 0x2d
+    cpu MHz     : 2494.328
+
+    作为对比，不采用这两个kernel参数的系统，cpu进行了主动降频
+    processor	: 1
+    vendor_id	: GenuineIntel
+    cpu family	: 6
+    model		: 61
+    model name	: Intel(R) Core(TM) i5-5200U CPU @ 2.20GHz
+    stepping	: 4
+    microcode	: 0x2d
+    cpu MHz		: 915.656
+
+    注意：如果采用这两个内核参数启动后，cpu将全力运行，风扇也会全力运转，能耗非常大
+
+
+    2. 使用/dev/cpu_dma_latency接口
+
+    linux kernel提供了PM QOS接口，通过这个接口应用程序可以注册一个对latency的服务质量请求，
+    操作系统将尽力来保证。/dev/cpu_dma_latency是一个字符设备文件，可以写入一个32位的整数
+    代表此进程需要的最大反应时间，单位是微秒，如果写入0，代表需要最快的反应时间。
+
+    这里以cyclictest.c (https://wiki.linuxfoundation.org/realtime/documentation/howto/tools/cyclictest/start)代码为例，看看如何使用这个接口
+
+    latency_target_fd = open("/dev/cpu_dma_latency", O_RDWR);
+    if (latency_target_fd == -1) {
+        err_msg_n(errno, "WARN: open /dev/cpu_dma_latency");
+        return;
+    }
+
+    err = write(latency_target_fd, &latency_target_value, 4);
+
+    这里latency_target_value的数值由 --latency 选项输入，注意打开的文件描述符在写入
+    数字后并不关闭，只有这样才能起到作用，一旦关闭，数值会恢复到系统默认值2000000000us
+
+
+    下面我们使用cyclictest在Ubuntu-19.04 thinkpad笔记本上做一个简单的测试，看看设置不同
+    的数值对整体延时的影响。kernel我们采用5.0.0-15-lowlatency，这是一个打了RT patch的
+    官方kernel版本。
+
+    采用不同的设置值进行测试，可以看到明显的区别，--latency=n 将设置/dev/cpu_dma_latency
+    设置为n，当采用0和1000us进行设置时，可以看到采用0时效果明显好于1000us
+
+    # ./cyclictest --smp --latency=0 -l 10000 -i 1000
+    # /dev/cpu_dma_latency set to 0us
+    policy: other/other: loadavg: 0.43 0.42 0.28 1/814 12797          
+
+    T: 0 (12794) P: 0 I:1000 C:  10000 Min:      5 Act:   53 Avg:   56 Max:     586
+    T: 1 (12795) P: 0 I:1500 C:   6665 Min:     20 Act:   53 Avg:   56 Max:    4164
+    T: 2 (12796) P: 0 I:2000 C:   5000 Min:      5 Act:   53 Avg:   56 Max:     690
+    T: 3 (12797) P: 0 I:2500 C:   4000 Min:      7 Act:   54 Avg:   57 Max:    1774
+
+    # ./cyclictest --smp --latency=1000 -l 10000 -i 1000
+    # /dev/cpu_dma_latency set to 1000us
+    policy: other/other: loadavg: 0.48 0.43 0.28 1/816 12804          
+
+    T: 0 (12801) P: 0 I:1000 C:  10000 Min:     19 Act:   98 Avg:   88 Max:    1417
+    T: 1 (12802) P: 0 I:1500 C:   6669 Min:     24 Act:   97 Avg:   88 Max:    2033
+    T: 2 (12803) P: 0 I:2000 C:   5003 Min:     20 Act:   94 Avg:   93 Max:    1627
+    T: 3 (12804) P: 0 I:2500 C:   4000 Min:     33 Act:   94 Avg:  104 Max:    5120
+
+    参考资料:
+    1. linux kernel-5.0.1 Documentation/power/pm_qos_interface.txt
+    2. https://access.redhat.com/articles/65410
+    3. https://blog.csdn.net/chdhust/article/details/80675569
